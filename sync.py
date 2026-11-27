@@ -131,6 +131,7 @@ Government Agricultural Data Dashboard
 """)
 
 st.divider()
+
 # ==========================================
 # 4. AMBIL TANGGAL SNAPSHOT
 # ==========================================
@@ -254,7 +255,255 @@ if menu == "Dashboard Utama":
             )
 
         with col2:
-            search = st.text_input(
+
+            fig = px.pie(
+                df,
+                names="kabupaten",
+                values="total_luas_lahan",
+                title="Distribusi Luas Lahan"
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
+
+        st.subheader("Ringkasan Kabupaten")
+
+        st.dataframe(
+            df,
+            use_container_width=True
+        )
+
+
+# ==========================================
+# 7. STATISTIK KABUPATEN
+# ==========================================
+
+elif menu == "Statistik Kabupaten":
+
+    df = read_data("""
+        SELECT
+            kabupaten,
+            total_petani,
+            total_luas_lahan
+        FROM dw.vw_petani_kabupaten
+        WHERE id_tanggal = %s
+        ORDER BY kabupaten
+    """, (selected_date,))
+
+    st.subheader("Analisis Kabupaten")
+
+    if df.empty:
+
+        st.warning("Data kabupaten belum tersedia.")
+
+    else:
+
+        kabupaten = st.selectbox(
+            "Pilih Kabupaten",
+            ["Semua Kabupaten"] + df["kabupaten"].tolist()
+        )
+
+        if kabupaten != "Semua Kabupaten":
+
+            df = df[
+                df["kabupaten"] == kabupaten
+            ]
+
+        fig = px.bar(
+            df,
+            x="kabupaten",
+            y="total_petani",
+            color="kabupaten",
+            text="total_petani",
+            title="Jumlah Petani"
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+        st.dataframe(
+            df,
+            use_container_width=True
+        )
+
+# ==========================================
+# 8. STATISTIK KOMODITAS
+# ==========================================
+
+elif menu == "Statistik Komoditas":
+
+    df = read_data("""
+        SELECT
+            nama_komoditas,
+            SUM(total_petani) AS total_petani,
+            SUM(total_luas_lahan) AS total_luas_lahan
+        FROM dw.vw_petani_komoditas
+        WHERE id_tanggal = %s
+        GROUP BY nama_komoditas
+        ORDER BY total_petani DESC
+    """, (selected_date,))
+
+    st.subheader("Statistik Komoditas Pertanian")
+
+    if df.empty:
+
+        st.warning("Data komoditas belum tersedia.")
+
+    else:
+
+        fig = px.bar(
+            df,
+            x="nama_komoditas",
+            y="total_petani",
+            color="nama_komoditas",
+            title="Jumlah Petani Berdasarkan Komoditas"
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True
+        )
+
+        st.dataframe(
+            df,
+            use_container_width=True
+        )
+
+
+# ==========================================
+# 9. DATA PETANI
+# ==========================================
+
+elif menu == "Data Petani":
+
+    st.subheader("Database Petani")
+
+    # --------------------------------------
+    # 9.1 FILTER KABUPATEN
+    # --------------------------------------
+
+    kabupaten_df = read_data("""
+        SELECT DISTINCT wilayah_sumber
+        FROM dw.fact_petani_harian
+        WHERE id_tanggal = %s
+        ORDER BY wilayah_sumber
+    """, (selected_date,))
+
+
+    # --------------------------------------
+    # 9.2 FILTER KOMODITAS
+    # --------------------------------------
+
+    komoditas_df = read_data("""
+        SELECT DISTINCT k.nama_komoditas
+        FROM dw.fact_petani_harian f
+        JOIN dw.dim_komoditas k
+            ON f.id_komoditas = k.id_komoditas
+        WHERE f.id_tanggal = %s
+        ORDER BY k.nama_komoditas
+    """, (selected_date,))
+
+
+    # --------------------------------------
+    # 9.3 PILIH FILTER
+    # --------------------------------------
+
+    kab_options = (
+        ["Semua"] +
+        kabupaten_df["wilayah_sumber"].dropna().tolist()
+    )
+
+    kom_options = (
+        ["Semua"] +
+        komoditas_df["nama_komoditas"].dropna().tolist()
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        kab = st.selectbox(
+            "Filter Kabupaten",
+            kab_options
+        )
+
+    with col2:
+
+        kom = st.selectbox(
+            "Filter Komoditas",
+            kom_options
+        )
+
+
+    # --------------------------------------
+    # 9.4 QUERY DATA PETANI
+    # --------------------------------------
+
+    query = """
+        SELECT
+            f.kode_petani,
+            f.wilayah_sumber AS kabupaten,
+            w.desa,
+            k.nama_komoditas,
+            f.luas_lahan
+        FROM dw.fact_petani_harian f
+
+        JOIN dw.dim_wilayah w
+            ON f.id_wilayah = w.id_wilayah
+
+        JOIN dw.dim_komoditas k
+            ON f.id_komoditas = k.id_komoditas
+
+        WHERE f.id_tanggal = %s
+    """
+
+    params = [selected_date]
+
+
+    if kab != "Semua":
+
+        query += """
+            AND f.wilayah_sumber = %s
+        """
+
+        params.append(kab)
+
+
+    if kom != "Semua":
+
+        query += """
+            AND k.nama_komoditas = %s
+        """
+
+        params.append(kom)
+
+
+    query += """
+        ORDER BY
+            f.wilayah_sumber,
+            w.desa
+    """
+
+
+    df = read_data(
+        query,
+        tuple(params)
+    )
+
+
+    # --------------------------------------
+    # 9.5 PENCARIAN DATA
+    # --------------------------------------
+
+    st.write(
+        f"Jumlah data: {len(df):,} petani"
+    )
+
+search = st.text_input(
         "Cari kode petani atau desa"
     )
 
