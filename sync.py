@@ -35,18 +35,28 @@ st.markdown("""
 # 2. KONEKSI DATABASE DATA WAREHOUSE
 # ==========================================
 
+import os
+import streamlit as st
+
 def get_database_url():
 
+    # 1. Prioritaskan environment variable GitHub Actions
+    database_url = os.getenv("DATAWAREHOUSE_URL")
+
+    if database_url:
+        return database_url
+
+    # 2. Jika dijalankan di Streamlit Cloud,
+    # gunakan konfigurasi Streamlit Secrets
     try:
         return st.secrets["datawarehouse"]["url"]
 
-    except KeyError:
-        st.error(
-            "Konfigurasi Data Warehouse tidak ditemukan. "
-            "Periksa Secrets Streamlit Cloud: "
-            "[datawarehouse] dan url."
-        )
-        st.stop()
+    except Exception as e:
+        raise RuntimeError(
+            "Koneksi Data Warehouse belum dikonfigurasi. "
+            "Tambahkan DATAWAREHOUSE_URL pada GitHub Actions "
+            "atau [datawarehouse].url pada Streamlit Secrets."
+        ) from e
 
 
 def read_data(query, params=None):
@@ -121,8 +131,6 @@ Government Agricultural Data Dashboard
 """)
 
 st.divider()
-
-
 # ==========================================
 # 4. AMBIL TANGGAL SNAPSHOT
 # ==========================================
@@ -202,3 +210,109 @@ if menu == "Dashboard Utama":
     c3.metric(
         "Kabupaten",
         int(r.total_kabupaten)
+    )
+
+    c4.metric(
+        "Komoditas",
+        int(r.total_komoditas)
+    )
+
+    st.subheader("Sebaran Petani per Kabupaten")
+
+    df = read_data("""
+        SELECT
+            kabupaten,
+            total_petani,
+            total_luas_lahan
+        FROM dw.vw_petani_kabupaten
+        WHERE id_tanggal = %s
+        ORDER BY total_petani DESC
+    """, (selected_date,))
+
+    if df.empty:
+
+        st.info("Data statistik kabupaten belum tersedia.")
+
+    else:
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+
+            fig = px.bar(
+                df,
+                x="kabupaten",
+                y="total_petani",
+                color="kabupaten",
+                title="Jumlah Petani per Kabupaten",
+                text="total_petani"
+            )
+
+            st.plotly_chart(
+                fig,
+                use_container_width=True
+            )
+
+        with col2:
+            search = st.text_input(
+        "Cari kode petani atau desa"
+    )
+
+    if search and not df.empty:
+
+        mask = (
+            df["kode_petani"].astype(str).str.contains(
+                search,
+                case=False,
+                na=False,
+                regex=False
+            )
+            |
+            df["desa"].astype(str).str.contains(
+                search,
+                case=False,
+                na=False,
+                regex=False
+            )
+        )
+
+        df = df[mask]
+
+
+    # --------------------------------------
+    # 9.6 TAMPILKAN DATA
+    # --------------------------------------
+
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+    # --------------------------------------
+    # 9.7 DOWNLOAD CSV
+    # --------------------------------------
+
+    csv = df.to_csv(
+        index=False
+    ).encode("utf-8-sig")
+
+    st.download_button(
+        label="📥 Download Data CSV",
+        data=csv,
+        file_name="data_petani_sumut.csv",
+        mime="text/csv"
+    )
+
+
+# ==========================================
+# 10. FOOTER
+# ==========================================
+
+st.divider()
+
+st.caption(
+    "SIM-PETANI SUMUT | Data Warehouse Pertanian "
+    "| Universitas Sumatera Utara"
+)
